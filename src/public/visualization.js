@@ -25,6 +25,7 @@ const FOOD_BOUNDS_THRESHOLD = 0.4; // Threshold for distance from center (as per
 const FOOD_SUPER_PUSH_STRENGTH = 0.1; // Stronger force when food is too far from center
 
 // Visual Settings
+const USE_DOLLAR_SIGNS = true; // Flag to switch between triangles and dollar signs
 const PARTICLE_COLOR_SATURATION = '70%'; // HSL saturation for particles
 const PARTICLE_COLOR_LIGHTNESS = '50%'; // HSL lightness for particles
 const PARTICLE_COLOR_ALPHA = 0.6; // Alpha transparency for particles
@@ -48,6 +49,7 @@ const SHRINK_THRESHOLD = 15; // Threshold below which particles shrink faster
 const REMOVAL_THRESHOLD = 6; // Threshold below which particles are removed
 const SHRINK_INTERVAL = 0.016; // Time interval for shrinking calculation
 const SIZE_INTERPOLATION_SPEED = 0.1; // Speed of size transitions
+const USE_CASH_REGISTER = true; 
 
 class Particle {
     constructor(x, y, radius, domain, color, isFood = false) {
@@ -215,7 +217,7 @@ class Particle {
         // Enhanced boundary checks for food particles
         if (this.isFood) {
             // Check if any part of the triangle shape is out of bounds
-            const size = this.radius * 2;
+            const size = this.radius * 5;
             let outOfBounds = false;
             
             // Check all three vertices of the triangle
@@ -276,32 +278,80 @@ class Particle {
         ctx.closePath();
     }
 
+    drawDollarSign(ctx, x, y, size) {
+        ctx.save();
+        
+        // Draw glow effect
+        const glowSize = size * 2; // Larger glow for better visibility
+        const gradient = ctx.createRadialGradient(
+            x, y, 0,
+            x, y, glowSize
+        );
+        gradient.addColorStop(0, this.color);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw dollar sign
+        ctx.translate(x, y);
+        
+        // Scale the size for better visibility
+        const scaledSize = size * 1.5;
+        
+        ctx.beginPath();
+        // Vertical line
+        ctx.moveTo(0, -scaledSize);
+        ctx.lineTo(0, scaledSize);
+        
+        // Top S curve
+        ctx.moveTo(scaledSize/2, -scaledSize);
+        ctx.lineTo(-scaledSize/2, -scaledSize);
+        ctx.lineTo(-scaledSize/2, 0);
+        ctx.lineTo(scaledSize/2, 0);
+        
+        // Bottom S curve
+        ctx.lineTo(scaledSize/2, scaledSize);
+        ctx.lineTo(-scaledSize/2, scaledSize);
+        
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+    }
+
     draw(ctx) {
         if (this.isFood) {
-            // Draw food particles as hollow triangles
-            ctx.save();
-            ctx.translate(this.x, this.y);
-            
-            ctx.beginPath();
-            const size = this.radius * 2;
-            // Draw an equilateral triangle
-            for (let i = 0; i < 3; i++) {
-                const angle = (i * 2 * Math.PI / 3) - (Math.PI / 2); // Start from top
-                const xPos = size * Math.cos(angle);
-                const yPos = size * Math.sin(angle);
-                if (i === 0) {
-                    ctx.moveTo(xPos, yPos);
-                } else {
-                    ctx.lineTo(xPos, yPos);
+            if (USE_DOLLAR_SIGNS) {
+                this.drawDollarSign(ctx, this.x, this.y, this.radius);
+            } else {
+                // Draw food particles as hollow triangles
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                ctx.beginPath();
+                const size = this.radius * 2;
+                // Draw an equilateral triangle
+                for (let i = 0; i < 3; i++) {
+                    const angle = (i * 2 * Math.PI / 3) - (Math.PI / 2); // Start from top
+                    const xPos = size * Math.cos(angle);
+                    const yPos = size * Math.sin(angle);
+                    if (i === 0) {
+                        ctx.moveTo(xPos, yPos);
+                    } else {
+                        ctx.lineTo(xPos, yPos);
+                    }
                 }
+                ctx.closePath();
+                
+                // Stroke only for hollow effect
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
             }
-            ctx.closePath();
-            
-            // Stroke only for hollow effect
-            ctx.strokeStyle = this.color;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.restore();
         } else {
             // Draw glow effect
             if (this.glowIntensity > 0.1) {
@@ -325,7 +375,7 @@ class Particle {
             // Draw domain name and size if particle is large enough
             if (this.radius > DOMAIN_TEXT_THRESHOLD) {
                 ctx.fillStyle = 'white';
-                ctx.font = '12px monospace';
+                ctx.font = '18px monospace';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 // Draw domain name
@@ -343,15 +393,30 @@ class Particle {
     }
 }
 
-// Initialize Tone synth for eating sounds
+// Initialize audio context and buffers
+let audioContext;
+let cashRegisterBuffer;
 let eatingSynth;
-// Initialize Tone.js on user interaction
+// Flag to switch between sound types
+
+// Initialize audio on user interaction
 document.addEventListener('click', async () => {
-    if (!eatingSynth) {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // Load cash register sound
+        try {
+            const response = await fetch('cash-register-kaching-sound-effect-125042.mp3');
+            const arrayBuffer = await response.arrayBuffer();
+            cashRegisterBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        } catch (error) {
+            console.error('Error loading cash register sound:', error);
+        }
+    }
+    if (!eatingSynth && !USE_CASH_REGISTER) {
         await Tone.start();
         eatingSynth = new Tone.Synth({
             oscillator: {
-                type: 'sawtooth8', // 8-bit style waveform
+                type: 'sawtooth8',
             },
             envelope: {
                 attack: 0.005,
@@ -367,33 +432,56 @@ document.addEventListener('click', async () => {
 let lastPlayTime = 0;
 const MIN_PLAY_INTERVAL = 0.05; // Minimum time between sounds in seconds
 
-// Function to create eating sound using Tone.js
+// Function to create eating sound
 function createEatingSound(baseFreq) {
-    if (!eatingSynth) return;
+    const now = USE_CASH_REGISTER ? audioContext?.currentTime : Tone.now();
+    if (!now) return;
     
-    const now = Tone.now();
     // Ensure minimum time between triggers
     if (now - lastPlayTime < MIN_PLAY_INTERVAL) {
         return;
     }
     lastPlayTime = now;
     
-    // Randomize frequency for this eat
-    const startFreq = baseFreq + (Math.random() - 0.5) * 50; // ±25Hz variation
-    const endFreq = startFreq * 0.5 + (Math.random() - 0.5) * 30; // ±15Hz variation on end freq
+    if (USE_CASH_REGISTER && cashRegisterBuffer && audioContext) {
+        // Create source and gain nodes
+        const source = audioContext.createBufferSource();
+        const gainNode = audioContext.createGain();
+        
+        source.buffer = cashRegisterBuffer;
+        
+        // Vary playback rate based on baseFreq
+        const baseRate = baseFreq / 200; // Normalize frequency to reasonable playback rate
+        const variation = (Math.random() - 0.5) * 0.4; // ±0.2 variation
+        source.playbackRate.value = Math.max(0.5, Math.min(2.0, baseRate + variation));
+        
+        // Randomize volume
+        gainNode.gain.value = 0.3 + Math.random() * 0.2;
+        
+        // Connect nodes
+        source.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Play sound
+        source.start(0);
+        return;
+    }
     
-    // Randomize duration
-    const duration = 0.08 + Math.random() * 0.04; // 0.08-0.12 seconds
-    
-    // Randomize volume
-    const volume = -12 + Math.random() * 4; // -12 to -8 dB range
-    
-    // Schedule the sound
-    eatingSynth.volume.value = volume;
-    eatingSynth.triggerAttackRelease(startFreq, duration, now);
-    
-    // Schedule frequency ramp
-    eatingSynth.frequency.rampTo(endFreq, duration, now);
+    // Fallback to ToneJS if cash register sound isn't ready
+    if (!USE_CASH_REGISTER && eatingSynth) {
+        // Randomize frequency for this eat
+        const startFreq = baseFreq + (Math.random() - 0.5) * 50;
+        const endFreq = startFreq * 0.5 + (Math.random() - 0.5) * 30;
+        
+        // Randomize duration and volume
+        const duration = 0.08 + Math.random() * 0.04;
+        const volume = -12 + Math.random() * 4;
+        
+        // Schedule the sound
+        eatingSynth.volume.value = volume;
+        eatingSynth.triggerAttackRelease(startFreq, duration, now);
+        eatingSynth.frequency.rampTo(endFreq, duration, now);
+    }
 }
 
 class FluidVisualization {
@@ -820,7 +908,7 @@ class FluidVisualization {
                             return;
                         } else {
                             // Enhanced expulsion for food colliding with different domain orbs
-                            const bounceForce = 0; // Increased bounce force
+                            const bounceForce = 1; // Increased bounce force
                             food.vx = -food.vx * bounceForce;
                             food.vy = -food.vy * bounceForce;
                             
