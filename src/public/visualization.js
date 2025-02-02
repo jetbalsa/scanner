@@ -1,23 +1,23 @@
 // Particle Movement Settings
 const PARTICLE_BASE_VELOCITY = 2; // Base velocity multiplier for non-food particles
-const FOOD_VELOCITY = 1; // Base velocity multiplier for food particles
-const FOOD_LIFETIME = 20000; // Food particles will be removed after 15 seconds if not eaten
-const SEEK_FORCE = 0.09; // Force applied when particles seek food
+const FOOD_VELOCITY = 0.7; // Base velocity multiplier for food particles
+const FOOD_LIFETIME = 60000; // Food particles will be removed after 15 seconds if not eaten
+const SEEK_FORCE = 0.2; // Force applied when particles seek food
 const RANDOM_MOVEMENT = 0.1; // Random movement multiplier for natural motion
 const GRAVITATIONAL_FORCE = 0; // Force pulling particles toward section center
-const VELOCITY_DAMPENING = 0.98; // Dampening factor for smooth movement
+const VELOCITY_DAMPENING = 0.95; // Dampening factor for smooth movement
 const BOUNCE_FORCE = 0.1; // Force applied when particles bounce off boundaries
 
 // Particle Size Settings
 const MIN_PARTICLE_RADIUS = 0.5; // Minimum radius for any particle
 const FOOD_SIZE_MULTIPLIER = 0.2; // Size multiplier for food particles
-const MAX_FOOD_SIZE = 10; // Maximum size for food particles
+const MAX_FOOD_SIZE = 50; // Maximum size for food particles
 const PARTICLE_SIZE_MULTIPLIER = 0.5; // Size multiplier for non-food particles
 const MAX_PARTICLE_SIZE = 10; // Maximum size for non-food particles
-const DOMAIN_TEXT_THRESHOLD = 1; // Minimum radius for showing domain text
+const DOMAIN_TEXT_THRESHOLD = 8; // Minimum radius for showing domain text
 
 // Food Particle Movement
-const FOOD_FLOW_STRENGTH = 0.01; // Base flow force towards center for food
+const FOOD_FLOW_STRENGTH = 0.02; // Base flow force towards center for food
 const FOOD_CIRCULAR_STRENGTH = 0.5; // Strength of circular motion for food
 const FOOD_RANDOM_MOVEMENT = 0.2; // Random movement multiplier for food
 const FOOD_DAMPENING = 0.70; // Dampening factor for food particles
@@ -33,19 +33,19 @@ const FOOD_COLOR_LIGHTNESS = '80%'; // HSL lightness for food particles
 const GLOW_DECAY_RATE = 0.95; // Rate at which particle glow effect fades
 
 // Batch Processing Settings
-const DEFAULT_BATCH_SIZE = 100; // Number of particles to process per batch
+const DEFAULT_BATCH_SIZE = 300; // Number of particles to process per batch
 const BATCH_INTERVAL = 100; // Time between batches in milliseconds
-const FOOD_BATCH_THRESHOLD = 50; // Start batching food when buffer exceeds this count
+const FOOD_BATCH_THRESHOLD = 100; // Start batching food when buffer exceeds this count
 const MAX_ACTIVE_FOOD = 100; // Maximum number of food particles allowed on field
 
 // Section Settings
-const MAX_PARTICLE_SIZE_PERCENT = 0.20; // Maximum particle size as percentage of section size
+const MAX_PARTICLE_SIZE_PERCENT = 0.10; // Maximum particle size as percentage of section size
 const SECTION_TRANSITION_SPEED = 0.1; // Speed of section position/size transitions
 
 // Particle Shrinking Settings
 const BASE_SHRINK_RATE = 0.4; // Base rate at which particles shrink over time
-const SMALL_PARTICLE_MULTIPLIER = 2.5; // Multiplier for shrinking small particles faster
-const SHRINK_THRESHOLD = 15; // Threshold below which particles shrink faster
+const SMALL_PARTICLE_MULTIPLIER = 1.5; // Multiplier for shrinking small particles faster
+const SHRINK_THRESHOLD = 7; // Threshold below which particles shrink faster
 const REMOVAL_THRESHOLD = 6; // Threshold below which particles are removed
 const SHRINK_INTERVAL = 0.016; // Time interval for shrinking calculation
 const SIZE_INTERPOLATION_SPEED = 0.1; // Speed of size transitions
@@ -64,6 +64,8 @@ class Particle {
         this.targetRadius = this.radius;
         this.domain = domain;
         this.baseDomain = this.getBaseDomain(domain);
+        this.currentTrackedFood = null;
+        this.foodTrackingStartTime = null;
         if (isFood) {
             // Parse the HSLA color
             const hslaMatch = color.match(/hsla\((\d+),\s*([^,]+),\s*([^,]+),\s*([^)]+)\)/);
@@ -92,10 +94,17 @@ class Particle {
         return parts.slice(-2).join('.');
     }
 
-    findNearestFood(particles) {
+    findNearestFood(particles, section) {
         let nearestFood = null;
         let minDistance = Infinity;
-        
+        const now = Date.now();
+        // Calculate stopRadius as percentage of the smallest section dimension
+        const percentageFromCenter = 0.25; // 25% of the smallest dimension
+        const smallestDimension = Math.min(section.width, section.height);
+        const stopRadius = smallestDimension * percentageFromCenter;
+        const centerX = section.x + section.width / 2;
+        const centerY = section.y + section.height / 2;
+
         particles.forEach(p => {
             if (p.isFood && p.baseDomain === this.baseDomain) {
                 const dist = this.distanceTo(p);
@@ -105,7 +114,45 @@ class Particle {
                 }
             }
         });
-        
+        // Check if we're tracking a new food particle
+        if (nearestFood !== this.currentTrackedFood) {
+            this.currentTrackedFood = nearestFood;
+            this.foodTrackingStartTime = now;
+        }
+        // If we've been tracking the same food for too long (10 seconds)
+        else if (nearestFood && (now - this.foodTrackingStartTime) > 10000) {
+            // Teleport the food particle to the center of the screen
+            // Teleport to center if out of bounds
+            nearestFood.x = section.x + section.width / 2;
+            nearestFood.y = section.y + section.height / 2;
+            
+            // Apply strong push force toward center
+            nearestFood.vx = 0;
+            nearestFood.vy = 0;
+            console.log("Food Reset due to idle!", nearestFood)
+            // Reset the tracking timer
+            this.foodTrackingStartTime = now;
+        }
+
+        if (!nearestFood) {
+            // Calculate distance to center
+            const distToCenter = Math.sqrt(
+                Math.pow(this.x - centerX, 2) + 
+                Math.pow(this.y - centerY, 2)
+            );
+    
+            // If we're outside the stop radius, return a virtual target at the center
+            if (distToCenter > stopRadius) {
+                return {
+                    x: centerX,
+                    y: centerY,
+                    isVirtualTarget: true // Flag to indicate this isn't a real food particle
+                };
+            } else {
+                // Inside stop radius - return null to stop movement
+                return null;
+            }
+        }
         return nearestFood;
     }
 
@@ -114,6 +161,10 @@ class Particle {
             // Shrink over time with size-dependent rate
             const timeSinceLastFed = (Date.now() - this.lastFed) / 1000;
             let currentShrinkRate = BASE_SHRINK_RATE;
+            if (timeSinceLastFed > 35) { // 2 minutes in seconds
+                currentShrinkRate *= 4;
+            }else{
+            }
             
             // Apply faster shrinking for smaller particles
             if (this.targetRadius < SHRINK_THRESHOLD) {
@@ -135,13 +186,14 @@ class Particle {
             this.glowIntensity *= GLOW_DECAY_RATE;
 
             // Find nearest food particle of same domain
-            const nearestFood = this.findNearestFood(particles);
+            const nearestFood = this.findNearestFood(particles, section);
             
             // Calculate center of section
             const centerX = section.x + section.width / 2;
             const centerY = section.y + section.height / 2;
             
             if (nearestFood) {
+
                 // Calculate direction to food
                 const dx = nearestFood.x - this.x;
                 const dy = nearestFood.y - this.y;
@@ -302,24 +354,14 @@ class Particle {
         const scaledSize = size * 1.5;
         
         ctx.beginPath();
-        // Vertical line
-        ctx.moveTo(0, -scaledSize);
-        ctx.lineTo(0, scaledSize);
-        
-        // Top S curve
-        ctx.moveTo(scaledSize/2, -scaledSize);
-        ctx.lineTo(-scaledSize/2, -scaledSize);
-        ctx.lineTo(-scaledSize/2, 0);
-        ctx.lineTo(scaledSize/2, 0);
-        
-        // Bottom S curve
-        ctx.lineTo(scaledSize/2, scaledSize);
-        ctx.lineTo(-scaledSize/2, scaledSize);
-        
-        ctx.strokeStyle = this.color;
-        ctx.lineWidth = 2;
-        ctx.stroke();
         ctx.restore();
+        ctx.fillStyle = this.color;
+        ctx.font = size * 5 + "px monospace";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Draw domain name
+        ctx.fillText("$", x, y);
+
     }
 
     draw(ctx) {
@@ -379,9 +421,9 @@ class Particle {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 // Draw domain name
-                ctx.fillText(this.domain, this.x, this.y);
+                ctx.fillText(this.getBaseDomain(this.domain), this.x, this.y);
                 // Draw size above domain
-                ctx.fillText(`Size: ${Math.round(this.radius)}`, this.x, this.y - 15);
+                //ctx.fillText(`Size: ${Math.round(this.radius)}`, this.x, this.y - 15);
             }
         }
     }
@@ -647,7 +689,7 @@ class FluidVisualization {
             const currentSize = this.ipSections.size;
             
             // If this is the first IP, use the full window
-            if (currentSize === 0) {
+            if (true) {
                 this.ipSections.set(normalizedIP, {
                     x: 0,
                     y: 0,
@@ -794,12 +836,19 @@ class FluidVisualization {
             // Find the largest particle
             // Find the section for each particle and calculate max size based on section
             nonFoodParticles.forEach(p => {
-                const section = Array.from(this.ipSections.entries())
+                const sectionEntry = Array.from(this.ipSections.entries())
                     .find(([_, s]) => 
                         p.x >= s.x && p.x < s.x + s.width && 
                         p.y >= s.y && p.y < s.y + s.height
-                    )[1];
-                
+                    );
+        
+                // Add null check before accessing [1]
+                if (!sectionEntry) {
+                    console.warn('No matching section found for particle:', p);
+                    return; // Skip this particle
+                }
+        
+                const section = sectionEntry[1];
                 // Max size is 60% of the smaller section dimension
                 const sectionMaxSize = Math.min(section.width, section.height) * this.maxParticleSizePercent;
                 
