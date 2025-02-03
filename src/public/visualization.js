@@ -36,7 +36,7 @@ const GLOW_DECAY_RATE = 0.95; // Rate at which particle glow effect fades
 const DEFAULT_BATCH_SIZE = 300; // Number of particles to process per batch
 const BATCH_INTERVAL = 100; // Time between batches in milliseconds
 const FOOD_BATCH_THRESHOLD = 100; // Start batching food when buffer exceeds this count
-const MAX_ACTIVE_FOOD = 100; // Maximum number of food particles allowed on field
+const MAX_ACTIVE_FOOD = 500; // Maximum number of food particles allowed on field
 
 // Section Settings
 const MAX_PARTICLE_SIZE_PERCENT = 0.10; // Maximum particle size as percentage of section size
