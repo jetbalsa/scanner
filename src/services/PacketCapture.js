@@ -60,7 +60,7 @@ class PacketCapture {
 
     handlePacket(raw_packet) {
         const packet = pcap.decode.packet(raw_packet);
-        
+        try {        
         // First check if it's an ethernet packet
         if (packet.payload && packet.payload.constructor.name === 'EthernetPacket') {
             const eth = packet.payload;
@@ -87,6 +87,9 @@ class PacketCapture {
                 }
             }
         }
+       } catch {
+		return
+      }
     }
 
     handleDnsPacket(ipv4) {
